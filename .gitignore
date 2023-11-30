@@ -1,0 +1,7 @@
+/target
+/files
+*.db
+/outputs
+*.jpg
+*.png
+face_rec_dlib
