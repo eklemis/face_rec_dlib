@@ -1,21 +1,9 @@
+use crate::compare::{FaceEncoding, FeatureSet};
+use crate::error::*;
 use bincode; // For serialization
 use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct FaceEncoding {
-    pub id: i32,
-    pub child_id: String,
-    pub feature_vector: Vec<f64>,
-    pub photo_file_name: String,
-    pub f_type: String,
-    pub timestamp: String,
-}
-pub struct FeatureSet {
-    pub atomics: Vec<FaceEncoding>,
-    pub average: FaceEncoding,
-    pub median: FaceEncoding,
-}
+use std::io;
 
 pub fn create_face_encodings_table(db_path: &str) -> Result<()> {
     let conn = Connection::open(db_path)?;
@@ -58,43 +46,55 @@ pub fn insert_face_encoding(
     Ok(())
 }
 
-pub fn get_features_by_child_id(db_path: &str, child_id: &str) -> Result<FeatureSet> {
-    let conn = Connection::open(db_path)?;
+pub fn get_features_by_child_id(db_path: &str, child_id: &str) -> Result<FeatureSet, AppError> {
+    let conn = Connection::open(db_path).map_err(AppError::Sqlite)?;
 
-    let mut stmt = conn.prepare(
-        "SELECT id, childID, featureVector, photoFileName, type, timestamp
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, childID, featureVector, photoFileName, type, timestamp
          FROM FaceEncodings
          WHERE childID = ?1",
-    )?;
+        )
+        .map_err(AppError::Sqlite)?;
 
     let mut atomics: Vec<FaceEncoding> = Vec::new();
     let mut average: Option<FaceEncoding> = None;
     let mut median: Option<FaceEncoding> = None;
 
-    let face_encoding_iter = stmt.query_map(params![child_id], |row| {
-        Ok(FaceEncoding {
-            id: row.get(0)?,
-            child_id: row.get(1)?,
-            feature_vector: bincode::deserialize(&row.get::<_, Vec<u8>>(2)?)?,
-            photo_file_name: row.get(3)?,
-            f_type: row.get(4)?,
-            timestamp: row.get(5)?,
+    let face_encoding_iter = stmt
+        .query_map(params![child_id], |row| {
+            let feature_vector_blob: Vec<u8> = row.get(2)?;
+
+            let feature_vector = match bincode::deserialize(&feature_vector_blob) {
+                Ok(vec) => vec,
+                Err(_) => return Err(rusqlite::Error::InvalidQuery), // Using a generic error
+            };
+
+            Ok(FaceEncoding {
+                id: row.get(0)?,
+                child_id: row.get(1)?,
+                feature_vector,
+                photo_file_name: row.get(3)?,
+                f_type: row.get(4)?,
+                timestamp: row.get(5)?,
+            })
         })
-    })?;
+        .map_err(AppError::Sqlite)?;
 
     for encoding in face_encoding_iter {
-        let encoding = encoding?;
+        let encoding = encoding.map_err(AppError::Sqlite)?;
         match encoding.f_type.as_str() {
             "Atomic" => atomics.push(encoding),
             "Average" => average = Some(encoding),
             "Median" => median = Some(encoding),
-            _ => {} // Handle unexpected type or do nothing
+            _ => {}
         }
     }
 
-    // Ensure that both average and median features are present
-    let average = average.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)?;
-    let median = median.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)?;
+    let average = average
+        .ok_or_else(|| AppError::Io(io::Error::new(io::ErrorKind::NotFound, "No average found")))?;
+    let median = median
+        .ok_or_else(|| AppError::Io(io::Error::new(io::ErrorKind::NotFound, "No median found")))?;
 
     Ok(FeatureSet {
         atomics,

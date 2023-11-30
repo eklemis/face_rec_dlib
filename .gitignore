@@ -5,3 +5,4 @@
 *.jpg
 *.png
 face_rec_dlib
+.DS_Store

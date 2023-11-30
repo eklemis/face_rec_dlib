@@ -16,5 +16,3 @@ bincode = "1.3.3"
 serde = {version = "1.0.193", features = ["derive"]}
 walkdir = "2.4.0"
 progress_bar = "1.0.5"
-rayon = "1.8.0"
-once_cell = "1.18.0"

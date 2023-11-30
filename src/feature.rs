@@ -2,7 +2,6 @@ use crate::dbs::{create_face_encodings_table, insert_face_encoding};
 use crate::stats::{compute_average, compute_median};
 use crate::tool::{get_full_file_name, tick};
 use image::ImageError;
-use rayon::prelude::*;
 use std::path::Path;
 use walkdir::WalkDir;
 
